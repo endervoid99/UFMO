@@ -58,6 +58,28 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(VMA)
 
+include(FetchContent)
+FetchContent_Declare(
+    EnTT
+    GIT_REPOSITORY https://github.com/skypjack/entt
+    GIT_TAG        v3.13.2
+    GIT_PROGRESS    TRUE
+    #suggest using a tag so the library doesn't update whenever new commits are pushed to a branch
+)
+
+FetchContent_MakeAvailable(EnTT)
+
+include(FetchContent)
+FetchContent_Declare(
+  cpptrace
+  GIT_REPOSITORY https://github.com/jeremy-rifkin/cpptrace.git
+  GIT_TAG        v0.5.2 # <HASH or TAG>
+)
+FetchContent_MakeAvailable(cpptrace)
+
+
+
+
 find_package(Vulkan REQUIRED ) 
 #find_package(VMA CONFIG REQUIRED)
 #find_package(Eigen3 REQUIRED ) 
@@ -67,8 +89,18 @@ find_package(Vulkan REQUIRED )
 add_library(engine "")
 include(sourcelist.cmake)
 
-target_link_libraries(${PROJECT_NAME} Vulkan::Vulkan VulkanMemoryAllocator Eigen3::Eigen spdlog::spdlog_header_only  SDL2main SDL2-static )
+target_link_libraries(${PROJECT_NAME} Vulkan::Vulkan VulkanMemoryAllocator Eigen3::Eigen spdlog::spdlog_header_only  SDL2main SDL2-static EnTT::EnTT cpptrace::cpptrace)
 
 target_include_directories(${PROJECT_NAME}
     PUBLIC ${PROJECT_SOURCE_DIR}/include)
+
+# On windows copy cpptrace.dll to the same directory as the executable for your_target
+if(WIN32)
+  add_custom_command(
+    TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    $<TARGET_FILE:cpptrace::cpptrace>
+    $<TARGET_FILE_DIR:${PROJECT_NAME}>
+  )
+endif()    
 

@@ -5,7 +5,10 @@ target_sources(engine PRIVATE
     src/VkBootstrapDispatch.h
     src/VkBootstrap.cpp
     src/VkBootstrap.h    
+    src/vk_initializers.cpp
+    src/vk_initializers.h
     include/engine/engine.h
     src/engine.cpp
+    
     include/engine/vk_types.h
 )

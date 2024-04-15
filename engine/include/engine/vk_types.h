@@ -19,11 +19,18 @@
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
 
-#define VK_CHECK(x)                                                     \
-    do {                                                                \
-        VkResult err = x;                                               \
-        if (err) {                                                      \
-             fmt::print("Detected Vulkan error: {}", string_VkResult(err)); \
-            abort();                                                    \
-        }                                                               \
-    } while (0)
+#include "spdlog/spdlog.h"
+#include <vulkan/vk_enum_string_helper.h>
+#include <cpptrace/cpptrace.hpp>
+
+#define VK_CHECK(x)                                                 \
+	do                                                              \
+	{                                                               \
+		VkResult err = x;                                           \
+		if (err)                                                    \
+		{                                                           \
+            spdlog::error("Detected Vulkan error: {} ",string_VkResult(err));           \
+			cpptrace::generate_trace().print(); 					\
+			abort();                                                \
+		}                                                           \
+	} while (0)
