@@ -14,7 +14,7 @@
 constexpr bool bUseValidationLayers = false;
 
 UFMOEngine *loadedEngine = nullptr;
-
+VkAllocationCallbacks* AllocatorCallback::p_allocatorCallback = nullptr;
 
 VkBool32 vkDebugMessageCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
                                 VkDebugUtilsMessageTypeFlagsEXT messageType,
@@ -27,18 +27,65 @@ VkBool32 vkDebugMessageCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSe
     {
 
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
-        spdlog::info("{}: {}",type,pCallbackData->pMessage);
+        spdlog::info("{}: {}", type, pCallbackData->pMessage);
         break;
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
-        spdlog::warn("{}: {}",type,pCallbackData->pMessage);
+        spdlog::warn("{}: {}", type, pCallbackData->pMessage);
         break;
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
-        spdlog::error("{}: {}",type,pCallbackData->pMessage);
+        spdlog::error("{}: {}", type, pCallbackData->pMessage);
+        cpptrace::generate_trace().print(); 
         break;
     default:
-    }    
+    }
     return VK_FALSE;
 }
+
+Swapchain::Swapchain(const BasicVulkanData& vulkanData) :  m_vulkanData(vulkanData)
+{ 
+
+};
+
+Swapchain::~Swapchain(){
+    
+};
+
+void Swapchain::init_swapchain() {
+    spdlog::info("UFMOEngine::init swapchain");
+    create_swapchain(m_vulkanData.windowExtent.width, m_vulkanData.windowExtent.height);
+}
+
+void Swapchain::create_swapchain(uint32_t width, uint32_t height)
+{
+    spdlog::info("UFMOEngine::create swapchain");
+    vkb::SwapchainBuilder swapchainBuilder{m_vulkanData.chosenGPU, m_vulkanData.device, m_vulkanData.surface};
+
+    m_data.swapchainImageFormat = VK_FORMAT_B8G8R8A8_UNORM;
+
+    vkb::Swapchain vkbSwapchain = swapchainBuilder
+                                      //.use_default_format_selection()
+                                      .set_desired_format(VkSurfaceFormatKHR{.format = m_data.swapchainImageFormat, .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
+                                      // use vsync present mode
+                                      //.set_desired_present_mode(VK_PRESENT_MODE_MAILBOX_KHR) //VK_PRESENT_MODE_FIFO_KHR VK_PRESENT_MODE_IMMEDIATE_KHR VK_PRESENT_MODE_MAILBOX_KHR
+                                      //.set_desired_present_mode(VK_PRESENT_MODE_IMMEDIATE_KHR)
+                                      .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
+                                      .set_desired_extent(width, height)
+                                      .set_allocation_callbacks(AllocatorCallback::p_allocatorCallback)
+                                      .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+                                      .build()
+                                      .value();
+
+    // VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : can render directly to that image
+    // VK_IMAGE_USAGE_TRANSFER_DST_BIT: render to seperate image first (for example for post-processing) and TRANSFER to the swap chain image
+
+    m_data.swapchainExtent = vkbSwapchain.extent;
+    // store swapchain and its related images
+    m_data.swapchain = vkbSwapchain.swapchain;
+    m_data.swapchainImages = vkbSwapchain.get_images().value();
+    spdlog::debug("UFMOEngine::create swapchain: {} images created", m_data.swapchainImages.size());
+    m_data.swapchainImageViews = vkbSwapchain.get_image_views().value();
+}
+
 
 UFMOEngine &UFMOEngine::get() { return *loadedEngine; }
 
@@ -47,14 +94,26 @@ void UFMOEngine::cleanup()
     spdlog::info("UFMOEngine::cleanup");
     if (_isInitialized)
     {
+        for (int i = 0; i < FRAME_OVERLAP; i++)
+        {
+            VK_CHECK(vkWaitForFences(vulkanData.device, 1, &_frames[i]._renderFence, true, 1000000000));
+            // already written from before
+            vkDestroyCommandPool(vulkanData.device, _frames[i]._commandPool, nullptr);
+
+            // destroy sync objects
+            vkDestroyFence(vulkanData.device, _frames[i]._renderFence, nullptr);
+            vkDestroySemaphore(vulkanData.device, _frames[i]._renderSemaphore, nullptr);
+            vkDestroySemaphore(vulkanData.device, _frames[i]._swapchainSemaphore, nullptr);
+        }
+
         destroy_swapchain();
 
-        vkDestroySurfaceKHR(_instance, _surface, nullptr);
-        vkDestroyDevice(_device, nullptr);
+        vkDestroySurfaceKHR(vulkanData.instance, vulkanData.surface, nullptr);
+        vkDestroyDevice(vulkanData.device, nullptr);
 
-        vkb::destroy_debug_utils_messenger(_instance, _debug_messenger);
-        vkDestroyInstance(_instance, nullptr);
-        SDL_DestroyWindow(_window);
+        vkb::destroy_debug_utils_messenger(vulkanData.instance, vulkanData.debug_messenger);
+        vkDestroyInstance(vulkanData.instance, nullptr);
+        SDL_DestroyWindow(vulkanData.window);
     }
 
     // clear engine pointer
@@ -64,18 +123,17 @@ void UFMOEngine::cleanup()
 uint8_t UFMOEngine::init_vulkan()
 {
 
-
     spdlog::info("UFMOEngine::init vulkan");
     vkb::InstanceBuilder builder;
 
     PFN_vkDebugUtilsMessengerCallbackEXT callback = &vkDebugMessageCallback;
-#if defined(_DEBUG)        
+#if defined(_DEBUG)
     // make the vulkan instance, with basic debug features
     auto inst_ret = builder.set_app_name("Example Vulkan Application")
                         .request_validation_layers(true)
                         .set_debug_callback(callback)
                         .require_api_version(1, 3, 0)
-                        .set_allocation_callbacks(allocatorCallback)
+                        .set_allocation_callbacks(AllocatorCallback::p_allocatorCallback)
                         //.enable_layer("VK_LAYER_LUNARG_api_dump")
                         .build();
 
@@ -99,9 +157,9 @@ uint8_t UFMOEngine::init_vulkan()
     vkb::Instance vkb_inst = inst_ret.value();
 
     // grab the instance
-    _instance = vkb_inst.instance;
+    vulkanData.instance = vkb_inst.instance;
 
-    SDL_Vulkan_CreateSurface(_window, _instance, &_surface);
+    SDL_Vulkan_CreateSurface(vulkanData.window, vulkanData.instance, &vulkanData.surface);
 
     // vulkan 1.3 features
     VkPhysicalDeviceVulkan13Features features{};
@@ -124,7 +182,7 @@ uint8_t UFMOEngine::init_vulkan()
                                              .set_required_features_13(features)
                                              .set_required_features_12(features12)
                                              //.set_required_features(features10)
-                                             .set_surface(_surface)
+                                             .set_surface(vulkanData.surface)
                                              .select()
                                              .value();
 
@@ -134,10 +192,10 @@ uint8_t UFMOEngine::init_vulkan()
     vkb::Device vkbDevice = deviceBuilder.build().value();
 
     // Get the VkDevice handle used in the rest of a vulkan application
-    _device = vkbDevice.device;
-    _chosenGPU = physicalDevice.physical_device;
+    vulkanData.device = vkbDevice.device;
+    vulkanData.chosenGPU = physicalDevice.physical_device;
 
-    _debug_messenger = vkb_inst.debug_messenger;
+    vulkanData.debug_messenger = vkb_inst.debug_messenger;
 
     // use vkbootstrap to get a Graphics queue
     _graphicsQueue = vkbDevice.get_queue(vkb::QueueType::graphics).value();
@@ -163,12 +221,12 @@ uint8_t UFMOEngine::init()
 
     SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN);
 
-    _window = SDL_CreateWindow(
+    vulkanData.window = SDL_CreateWindow(
         "Vulkan Engine",
         SDL_WINDOWPOS_UNDEFINED,
         SDL_WINDOWPOS_UNDEFINED,
-        _windowExtent.width,
-        _windowExtent.height,
+        vulkanData.windowExtent.width,
+        vulkanData.windowExtent.height,
         window_flags);
 
     init_vulkan();
@@ -227,51 +285,30 @@ void UFMOEngine::run()
 }
 void UFMOEngine::create_swapchain(uint32_t width, uint32_t height)
 {
-    spdlog::info("UFMOEngine::create swapchain");
-    vkb::SwapchainBuilder swapchainBuilder{_chosenGPU, _device, _surface};
 
-    swapchain.swapchainImageFormat = VK_FORMAT_B8G8R8A8_UNORM;
-
-    vkb::Swapchain vkbSwapchain = swapchainBuilder
-                                      //.use_default_format_selection()
-                                      .set_desired_format(VkSurfaceFormatKHR{.format = swapchain.swapchainImageFormat, .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
-                                      // use vsync present mode
-                                      .set_desired_present_mode(VK_PRESENT_MODE_MAILBOX_KHR) //VK_PRESENT_MODE_FIFO_KHR VK_PRESENT_MODE_IMMEDIATE_KHR VK_PRESENT_MODE_MAILBOX_KHR
-                                      //.set_desired_present_mode(VK_PRESENT_MODE_IMMEDIATE_KHR)
-                                      .set_desired_extent(width, height)
-                                      .set_allocation_callbacks(allocatorCallback)
-                                      .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
-                                      .build()
-                                      .value();
-
-    // VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : can render directly to that image
-    // VK_IMAGE_USAGE_TRANSFER_DST_BIT: render to seperate image first (for example for post-processing) and TRANSFER to the swap chain image
-
-
-    swapchain.swapchainExtent = vkbSwapchain.extent;
-    // store swapchain and its related images
-    swapchain.swapchain = vkbSwapchain.swapchain;
-    swapchain.swapchainImages = vkbSwapchain.get_images().value();
-    spdlog::debug("UFMOEngine::create swapchain: {} images created",swapchain.swapchainImages.size());
-    swapchain.swapchainImageViews = vkbSwapchain.get_image_views().value();
 }
 
 void UFMOEngine::init_swapchain()
-{
-    spdlog::info("UFMOEngine::init swapchain");
-    create_swapchain(_windowExtent.width, _windowExtent.height);
+{    
+    if (!p_swapchain)
+    {
+        p_swapchain =  std::make_unique<Swapchain>(vulkanData);
+    }
+    p_swapchain->init_swapchain();    
 }
 
 void UFMOEngine::destroy_swapchain()
 {
-    vkDestroySwapchainKHR(_device, swapchain.swapchain, nullptr);
+    //TODO: delegate destroy to swapchain class
+    vkDestroySwapchainKHR(vulkanData.device, p_swapchain->getDataRef().swapchain, nullptr);
 
     // destroy swapchain resources
-    for (int i = 0; i < swapchain.swapchainImageViews.size(); i++)
+    for (int i = 0; i < p_swapchain->getDataRef().swapchainImageViews.size(); i++)
     {
 
-        vkDestroyImageView(_device, swapchain.swapchainImageViews[i], nullptr);
+        vkDestroyImageView(vulkanData.device, p_swapchain->getDataRef().swapchainImageViews[i], nullptr);
     }
+    p_swapchain.reset(nullptr);
 }
 
 void UFMOEngine::init_commands()
@@ -282,13 +319,13 @@ void UFMOEngine::init_commands()
     VkCommandPoolCreateInfo commandPoolInfo = {};
     commandPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     commandPoolInfo.pNext = nullptr;
-    commandPoolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT; //VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    commandPoolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT; // VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     commandPoolInfo.queueFamilyIndex = _graphicsQueueFamily;
 
     for (int i = 0; i < FRAME_OVERLAP; i++)
     {
 
-        VK_CHECK(vkCreateCommandPool(_device, &commandPoolInfo, nullptr, &_frames[i]._commandPool));
+        VK_CHECK(vkCreateCommandPool(vulkanData.device, &commandPoolInfo, nullptr, &_frames[i]._commandPool));
 
         // allocate the default command buffer that we will use for rendering
         VkCommandBufferAllocateInfo cmdAllocInfo = {};
@@ -298,64 +335,126 @@ void UFMOEngine::init_commands()
         cmdAllocInfo.commandBufferCount = 1;
         cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 
-        VK_CHECK(vkAllocateCommandBuffers(_device, &cmdAllocInfo, &_frames[i]._mainCommandBuffer));
+        VK_CHECK(vkAllocateCommandBuffers(vulkanData.device, &cmdAllocInfo, &_frames[i]._mainCommandBuffer));
     }
 }
 
 void UFMOEngine::init_sync_structures()
 {
     spdlog::info("UFMOEngine::init sync structures");
-	//create syncronization structures
-	//one fence to control when the gpu has finished rendering the frame,
-	//and 2 semaphores to syncronize rendering with swapchain
-	//we want the fence to start signalled so we can wait on it on the first frame
-    
-	VkFenceCreateInfo fenceCreateInfo = vkinit::fence_create_info(VK_FENCE_CREATE_SIGNALED_BIT);
-	VkSemaphoreCreateInfo semaphoreCreateInfo = vkinit::semaphore_create_info();
+    // create syncronization structures
+    // one fence to control when the gpu has finished rendering the frame,
+    // and 2 semaphores to syncronize rendering with swapchain
+    // we want the fence to start signalled so we can wait on it on the first frame
 
-	for (int i = 0; i < FRAME_OVERLAP; i++) {
-		VK_CHECK(vkCreateFence(_device, &fenceCreateInfo,  VK_NULL_HANDLE, &_frames[i]._renderFence));
+    VkFenceCreateInfo fenceCreateInfo = vkinit::fence_create_info(VK_FENCE_CREATE_SIGNALED_BIT);
+    VkSemaphoreCreateInfo semaphoreCreateInfo = vkinit::semaphore_create_info();
 
-		VK_CHECK(vkCreateSemaphore(_device, &semaphoreCreateInfo,  VK_NULL_HANDLE, &_frames[i]._swapchainSemaphore));
-		VK_CHECK(vkCreateSemaphore(_device, &semaphoreCreateInfo,  VK_NULL_HANDLE, &_frames[i]._renderSemaphore));
-	}
+    for (int i = 0; i < FRAME_OVERLAP; i++)
+    {
+        VK_CHECK(vkCreateFence(vulkanData.device, &fenceCreateInfo, VK_NULL_HANDLE, &_frames[i]._renderFence));
+
+        VK_CHECK(vkCreateSemaphore(vulkanData.device, &semaphoreCreateInfo, VK_NULL_HANDLE, &_frames[i]._swapchainSemaphore));
+        VK_CHECK(vkCreateSemaphore(vulkanData.device, &semaphoreCreateInfo, VK_NULL_HANDLE, &_frames[i]._renderSemaphore));
+    }
 }
 
 void UFMOEngine::draw()
 {
-    //spdlog::info("...");
-	// wait until the gpu has finished rendering the last frame. Timeout of 1
-	// second
-	VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000));
-	VK_CHECK(vkResetFences(_device, 1, &get_current_frame()._renderFence));
+    
+    //spdlog::debug("...{}",_frameNumber % FRAME_OVERLAP);
 
-    //request image from the swapchain
-	uint32_t swapchainImageIndex;
-                                                  
-    //if ( int i = VK_TIMOUT );
 
-    auto result = vkAcquireNextImageKHR(_device, swapchain.swapchain, 1000000000, get_current_frame()._swapchainSemaphore,  VK_NULL_HANDLE, &swapchainImageIndex);
+    // request image from the swapchain
+    uint32_t swapchainImageIndex;
 
-    	//naming it cmd for shorter writing
-	
+    // if ( int i = VK_TIMOUT );
+    VK_CHECK(vkWaitForFences(vulkanData.device, 1, &get_current_frame()._renderFence, true, 1000000000));
+    VK_CHECK(vkResetFences(vulkanData.device, 1, &get_current_frame()._renderFence));
+
+    auto result = vkAcquireNextImageKHR(vulkanData.device, p_swapchain->getDataRef().swapchain, 1000000000, get_current_frame()._swapchainSemaphore, VK_NULL_HANDLE, &swapchainImageIndex);
+
+        //  wait until the gpu has finished rendering the last frame. Timeout of 1
+    //  second
+    
+
+    // naming it cmd for shorter writing
+
     auto cmdPool = get_current_frame()._commandPool;
 
-    VK_CHECK(vkResetCommandPool(_device,cmdPool,0));
+    VK_CHECK(vkResetCommandPool(vulkanData.device, cmdPool, 0));
     auto cmd = get_current_frame()._mainCommandBuffer;
 
-	// now that we are sure that the commands finished executing, we can safely
-	// reset the command buffer to begin recording again.
-	//VK_CHECK(vkResetCommandBuffer(cmd, 0));
+    // now that we are sure that the commands finished executing, we can safely
+    // reset the command buffer to begin recording again.
+    // VK_CHECK(vkResetCommandBuffer(cmd, 0));
 
-	//begin the command buffer recording. We will use this command buffer exactly once, so we want to let vulkan know that
-	VkCommandBufferBeginInfo cmdBeginInfo = vkinit::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    // begin the command buffer recording. We will use this command buffer exactly once, so we want to let vulkan know that
+    VkCommandBufferBeginInfo cmdBeginInfo = vkinit::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
-	//start the command buffer recording
-	VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
+    // start the command buffer recording
+    VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
+    // make the swapchain image into writeable mode before rendering
+    vkutil::transition_image(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
-   // if (result == VK_TIMEOUT)
+    // make a clear-color from frame number. This will flash with a 120 frame period.
+    VkClearColorValue clearValue;
+    float flash = abs(sin(_frameNumber / 120.f));
+    flash = 1.0f;
+    // if (_frameNumber % 120 )
 
-	//VK_CHECK(vkAcquireNextImageKHR(_device, swapchain.swapchain, 1000000000, get_current_frame()._swapchainSemaphore,  VK_NULL_HANDLE, &swapchainImageIndex));
+    clearValue = {{0.0f, 0.0f, flash, 1.0f}};
+
+    VkImageSubresourceRange clearRange = vkinit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
+
+    // clear image
+    vkCmdClearColorImage(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+
+    // make the swapchain image into presentable mode VK_IMAGE_LAYOUT_GENERAL  VK_IMAGE_LAYOUT_UNDEFINED
+    // Write after Write
+    vkutil::transition_image_to_present(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+    // finalize the command buffer (we can no longer add commands, but it can now be executed)
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    // prepare the submission to the queue.
+    // we want to wait on the _presentSemaphore, as that semaphore is signaled when the swapchain is ready
+    // we will signal the _renderSemaphore, to signal that rendering has finished
+
+    VkCommandBufferSubmitInfo cmdinfo = vkinit::command_buffer_submit_info(cmd);
+
+    VkSemaphoreSubmitInfo waitInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR, get_current_frame()._swapchainSemaphore);
+    VkSemaphoreSubmitInfo signalInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, get_current_frame()._renderSemaphore);
+
+    VkSubmitInfo2 submit = vkinit::submit_info(&cmdinfo, &signalInfo, &waitInfo);
+
+    // submit command buffer to the queue and execute it.
+    //  _renderFence will now block until the graphic commands finish execution
+    VK_CHECK(vkQueueSubmit2(_graphicsQueue, 1, &submit, get_current_frame()._renderFence));
+
+    // prepare present
+    // this will put the image we just rendered to into the visible window.
+    // we want to wait on the _renderSemaphore for that,
+    // as its necessary that drawing commands have finished before the image is displayed to the user
+    VkPresentInfoKHR presentInfo = {};
+    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    presentInfo.pNext = nullptr;
+    presentInfo.pSwapchains = &p_swapchain->getDataRef().swapchain;
+    presentInfo.swapchainCount = 1;
+
+    presentInfo.pWaitSemaphores = &get_current_frame()._renderSemaphore;
+    presentInfo.waitSemaphoreCount = 1;
+
+    presentInfo.pImageIndices = &swapchainImageIndex;
+
+    //Present after Write
+    VK_CHECK(vkQueuePresentKHR(_graphicsQueue, &presentInfo));
+
+    // increase the number of frames drawn
+    _frameNumber++;
+
+    // if (result == VK_TIMEOUT)
+
+    // VK_CHECK(vkAcquireNextImageKHR(_device, swapchain.swapchain, 1000000000, get_current_frame()._swapchainSemaphore,  VK_NULL_HANDLE, &swapchainImageIndex));
 }
-

@@ -23,6 +23,7 @@
 #include <vulkan/vk_enum_string_helper.h>
 #include <cpptrace/cpptrace.hpp>
 
+
 #define VK_CHECK(x)                                                 \
 	do                                                              \
 	{                                                               \

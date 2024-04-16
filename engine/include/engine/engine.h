@@ -1,21 +1,39 @@
 #pragma once
 
 #include "vk_types.h"
+#include <memory>
 // #define _NO_DEBUG_HEAP 1
 
-struct FrameData {
+struct FrameData
+{
 
-	VkCommandPool _commandPool;
-	VkCommandBuffer _mainCommandBuffer;
+    VkCommandPool _commandPool;
+    VkCommandBuffer _mainCommandBuffer;
 
     VkSemaphore _swapchainSemaphore, _renderSemaphore;
-	VkFence _renderFence;
+    VkFence _renderFence;
+};
+
+constexpr unsigned int FRAME_OVERLAP = 3;
+
+struct AllocatorCallback {
+    // TODO: allocator callback implementation    
+    static VkAllocationCallbacks *p_allocatorCallback;
+};
+
+//TODO: rename to VulkanContext?
+struct BasicVulkanData {
+    VkInstance instance;                      // Vulkan library handle
+    VkDebugUtilsMessengerEXT debug_messenger; // Vulkan debug output handle
+    VkPhysicalDevice chosenGPU;               // GPU chosen as the default device
+    VkDevice device;                          // Vulkan device for commands
+    VkSurfaceKHR surface;                     // Vulkan window surface
+    struct SDL_Window* window{nullptr};
+    VkExtent2D windowExtent{1700, 900};
 };
 
 
-constexpr unsigned int FRAME_OVERLAP = 2;
-
-struct Swapchain {
+struct SwapchainData{
     VkSwapchainKHR swapchain;
     VkFormat swapchainImageFormat;
     std::vector<VkImage> swapchainImages;
@@ -23,33 +41,57 @@ struct Swapchain {
     VkExtent2D swapchainExtent;
 };
 
+class Swapchain
+{
+public:
+    Swapchain(const BasicVulkanData& vulkanData);// : m_vulkanData(vulkanData){ };
+    ~Swapchain();
+
+    void init_swapchain();    
+    void create_swapchain(uint32_t width, uint32_t height);
+    SwapchainData& getDataRef() {return m_data;};
+private:
+    
+
+    const BasicVulkanData& m_vulkanData;
+    SwapchainData m_data;
+
+    //VkSwapchainKHR swapchain;
+    //VkFormat swapchainImageFormat;
+    //std::vector<VkImage> swapchainImages;
+    //std::vector<VkImageView> swapchainImageViews;
+    //VkExtent2D swapchainExtent;
+};
+
+
+
 class UFMOEngine
 {
 private:
-    // TODO: allocator callback implementation
-    VkAllocationCallbacks *allocatorCallback = nullptr;
     
+
     bool _isInitialized{false};
     int _frameNumber{0};
     bool stop_rendering{false};
-    VkExtent2D _windowExtent{1700, 900};
+    //VkExtent2D _windowExtent{1700, 900};
 
     // instance + device
-    VkInstance _instance;                      // Vulkan library handle
-    VkDebugUtilsMessengerEXT _debug_messenger; // Vulkan debug output handle
-    VkPhysicalDevice _chosenGPU;               // GPU chosen as the default device
-    VkDevice _device;                          // Vulkan device for commands
-    VkSurfaceKHR _surface;                     // Vulkan window surface
+    BasicVulkanData vulkanData;
+    //VkInstance _instance;                      // Vulkan library handle
+    //VkDebugUtilsMessengerEXT _debug_messenger; // Vulkan debug output handle
+    //VkPhysicalDevice _chosenGPU;               // GPU chosen as the default device
+    //VkDevice _device;                          // Vulkan device for commands
+    //VkSurfaceKHR _surface;                     // Vulkan window surface
 
     // Swapchain
-    Swapchain swapchain;
-    //VkSwapchainKHR _swapchain;
-    //VkFormat _swapchainImageFormat;
-    //std::vector<VkImage> _swapchainImages;
-    //std::vector<VkImageView> _swapchainImageViews;
-    //VkExtent2D _swapchainExtent;
+    std::unique_ptr<Swapchain> p_swapchain;
+    // VkSwapchainKHR _swapchain;
+    // VkFormat _swapchainImageFormat;
+    // std::vector<VkImage> _swapchainImages;
+    // std::vector<VkImageView> _swapchainImageViews;
+    // VkExtent2D _swapchainExtent;
 
-    struct SDL_Window *_window{nullptr};
+    //struct SDL_Window *_window{nullptr};
 
     FrameData _frames[FRAME_OVERLAP];
 
