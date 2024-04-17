@@ -1,6 +1,8 @@
 #pragma once
 
 #include "vk_types.h"
+#include "engine/vk_descriptors.h"
+#include "../src/vk_pipelines.h"
 //#include <memory>
 //#include <tracy/Tracy.hpp>
 
@@ -132,8 +134,16 @@ private:
 
     VkQueue _graphicsQueue;
     uint32_t _graphicsQueueFamily;
+    void init_descriptors();
 
 public:
+    DescriptorAllocator globalDescriptorAllocator;
+
+	VkDescriptorSet _drawImageDescriptors;
+	VkDescriptorSetLayout _drawImageDescriptorLayout;
+    	VkPipeline _gradientPipeline;
+	VkPipelineLayout _gradientPipelineLayout;
+
     VulkanRenderer &get();
     uint8_t init();
     uint8_t initVulkan();
@@ -147,4 +157,6 @@ public:
     void initSyncStructures();
     void draw();
     void draw_background(VkCommandBuffer cmd);
+    void init_pipelines();
+	void init_background_pipelines();
 };

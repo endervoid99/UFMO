@@ -9,6 +9,10 @@ target_sources(engine PRIVATE
     src/vk_initializers.h
     include/engine/engine.h
     src/engine.cpp
+    include/engine/vk_descriptors.h
+    src/vk_descriptors.cpp
+    src/vk_pipelines.h
+    src/vk_pipelines.cpp
     #tracy/Tracy.hpp
     #TracyClient.cpp
     include/engine/vk_types.h
