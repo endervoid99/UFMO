@@ -1,5 +1,7 @@
 ﻿#include "vk_initializers.h"
 
+#include <tracy/Tracy.hpp>
+
 VkFenceCreateInfo vkinit::fence_create_info(VkFenceCreateFlags flags /*= 0*/)
 {
     VkFenceCreateInfo info = {};
@@ -90,6 +92,7 @@ VkImageSubresourceRange vkinit::image_subresource_range(VkImageAspectFlags aspec
 //TODO: move to vk_image.cpp
 void vkutil::transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout)
 {
+    ZoneScoped;
     VkImageMemoryBarrier2 imageBarrier {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
     imageBarrier.pNext = nullptr;
 

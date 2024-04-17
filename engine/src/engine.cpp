@@ -11,16 +11,24 @@
 #include "vk_initializers.h"
 #include "VkBootstrap.h"
 
+#include <tracy/Tracy.hpp>
+
+#define VMA_IMPLEMENTATION
+#include "vk_mem_alloc.h"
+
 constexpr bool bUseValidationLayers = false;
 
-UFMOEngine *loadedEngine = nullptr;
-VkAllocationCallbacks* AllocatorCallback::p_allocatorCallback = nullptr;
+VulkanRenderer *loadedEngine = nullptr;
+VkAllocationCallbacks *AllocatorCallback::p_allocatorCallback = nullptr;
+
+
 
 VkBool32 vkDebugMessageCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
                                 VkDebugUtilsMessageTypeFlagsEXT messageType,
                                 const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData,
                                 void *pUserData)
 {
+    ZoneScoped;
     auto severity = vkb::to_string_message_severity(messageSeverity);
     auto type = vkb::to_string_message_type(messageType);
     switch (messageSeverity)
@@ -34,29 +42,31 @@ VkBool32 vkDebugMessageCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSe
         break;
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
         spdlog::error("{}: {}", type, pCallbackData->pMessage);
-        cpptrace::generate_trace().print(); 
+        cpptrace::generate_trace().print();
         break;
     default:
     }
     return VK_FALSE;
 }
 
-Swapchain::Swapchain(const BasicVulkanData& vulkanData) :  m_vulkanData(vulkanData)
-{ 
+Swapchain::Swapchain(const BasicVulkanData &vulkanData) : m_vulkanData(vulkanData){
 
-};
+                                                          };
 
 Swapchain::~Swapchain(){
-    
+
 };
 
-void Swapchain::init_swapchain() {
+void Swapchain::initSwapchain()
+{
+    ZoneScoped;
     spdlog::info("UFMOEngine::init swapchain");
-    create_swapchain(m_vulkanData.windowExtent.width, m_vulkanData.windowExtent.height);
+    createSwapchain(m_vulkanData.windowExtent.width, m_vulkanData.windowExtent.height);
 }
 
-void Swapchain::create_swapchain(uint32_t width, uint32_t height)
+void Swapchain::createSwapchain(uint32_t width, uint32_t height)
 {
+    ZoneScoped;
     spdlog::info("UFMOEngine::create swapchain");
     vkb::SwapchainBuilder swapchainBuilder{m_vulkanData.chosenGPU, m_vulkanData.device, m_vulkanData.surface};
 
@@ -66,9 +76,9 @@ void Swapchain::create_swapchain(uint32_t width, uint32_t height)
                                       //.use_default_format_selection()
                                       .set_desired_format(VkSurfaceFormatKHR{.format = m_data.swapchainImageFormat, .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
                                       // use vsync present mode
-                                      //.set_desired_present_mode(VK_PRESENT_MODE_MAILBOX_KHR) //VK_PRESENT_MODE_FIFO_KHR VK_PRESENT_MODE_IMMEDIATE_KHR VK_PRESENT_MODE_MAILBOX_KHR
-                                      //.set_desired_present_mode(VK_PRESENT_MODE_IMMEDIATE_KHR)
-                                      .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
+                                      .set_desired_present_mode(VK_PRESENT_MODE_MAILBOX_KHR) //VK_PRESENT_MODE_FIFO_KHR VK_PRESENT_MODE_IMMEDIATE_KHR VK_PRESENT_MODE_MAILBOX_KHR
+                                      ///set_desired_present_mode(VK_PRESENT_MODE_IMMEDIATE_KHR)
+                                      //s.set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
                                       .set_desired_extent(width, height)
                                       .set_allocation_callbacks(AllocatorCallback::p_allocatorCallback)
                                       .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
@@ -86,17 +96,19 @@ void Swapchain::create_swapchain(uint32_t width, uint32_t height)
     m_data.swapchainImageViews = vkbSwapchain.get_image_views().value();
 }
 
+VulkanRenderer &VulkanRenderer::get() { return *loadedEngine; }
 
-UFMOEngine &UFMOEngine::get() { return *loadedEngine; }
-
-void UFMOEngine::cleanup()
+void VulkanRenderer::tearDown()
 {
+    ZoneScoped;
     spdlog::info("UFMOEngine::cleanup");
     if (_isInitialized)
     {
         for (int i = 0; i < FRAME_OVERLAP; i++)
         {
-            VK_CHECK(vkWaitForFences(vulkanData.device, 1, &_frames[i]._renderFence, true, 1000000000));
+            vkDeviceWaitIdle(vulkanData.device);
+            _mainDeletionQueue.flush();
+           // VK_CHECK(vkWaitForFences(vulkanData.device, 1, &_frames[i]._renderFence, true, 1000000000));
             // already written from before
             vkDestroyCommandPool(vulkanData.device, _frames[i]._commandPool, nullptr);
 
@@ -106,7 +118,7 @@ void UFMOEngine::cleanup()
             vkDestroySemaphore(vulkanData.device, _frames[i]._swapchainSemaphore, nullptr);
         }
 
-        destroy_swapchain();
+        destroySwapchain();
 
         vkDestroySurfaceKHR(vulkanData.instance, vulkanData.surface, nullptr);
         vkDestroyDevice(vulkanData.device, nullptr);
@@ -120,9 +132,9 @@ void UFMOEngine::cleanup()
     loadedEngine = nullptr;
 }
 
-uint8_t UFMOEngine::init_vulkan()
+uint8_t VulkanRenderer::initVulkan()
 {
-
+    ZoneScoped;
     spdlog::info("UFMOEngine::init vulkan");
     vkb::InstanceBuilder builder;
 
@@ -152,6 +164,7 @@ uint8_t UFMOEngine::init_vulkan()
     if (!inst_ret)
     {
         spdlog::critical("Failed to create Vulkan instance. Error: {} ", inst_ret.error().message());
+        cpptrace::generate_trace().print();
         return 1;
     }
     vkb::Instance vkb_inst = inst_ret.value();
@@ -201,13 +214,26 @@ uint8_t UFMOEngine::init_vulkan()
     _graphicsQueue = vkbDevice.get_queue(vkb::QueueType::graphics).value();
     _graphicsQueueFamily = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
 
+     // initialize the memory allocator
+    VmaAllocatorCreateInfo allocatorInfo = {};
+    allocatorInfo.physicalDevice = vulkanData.chosenGPU;
+    allocatorInfo.device = vulkanData.device;
+    allocatorInfo.instance = vulkanData.instance;
+    allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+    vmaCreateAllocator(&allocatorInfo, &vulkanData.allocator);
+
+    _mainDeletionQueue.push_function([&]() {
+        vmaDestroyAllocator(vulkanData.allocator);
+    });
+
     return 0;
 
     // spdlog::info("UFMOEngine::init vulkan finished");
 }
 
-uint8_t UFMOEngine::init()
+uint8_t VulkanRenderer::init()
 {
+    ZoneScoped;
 #if defined _DEBUG
     spdlog::set_level(spdlog::level::debug);
 #endif
@@ -229,13 +255,13 @@ uint8_t UFMOEngine::init()
         vulkanData.windowExtent.height,
         window_flags);
 
-    init_vulkan();
+    initVulkan();
 
-    init_swapchain();
+    initSwapchain();
 
-    init_commands();
+    initCommands();
 
-    init_sync_structures();
+    initSyncStructures();
 
     // everything went fine
     _isInitialized = true;
@@ -243,8 +269,9 @@ uint8_t UFMOEngine::init()
     // spdlog::info("UFMOEngine::init finished");
 }
 
-void UFMOEngine::run()
+void VulkanRenderer::run()
 {
+    ZoneScoped;
     spdlog::info("UFMOEngine::run");
     SDL_Event e;
     bool bQuit = false;
@@ -283,23 +310,24 @@ void UFMOEngine::run()
         draw();
     }
 }
-void UFMOEngine::create_swapchain(uint32_t width, uint32_t height)
+void VulkanRenderer::createSwapchain(uint32_t width, uint32_t height)
 {
-
 }
 
-void UFMOEngine::init_swapchain()
-{    
+void VulkanRenderer::initSwapchain()
+{
+    ZoneScoped;
     if (!p_swapchain)
     {
-        p_swapchain =  std::make_unique<Swapchain>(vulkanData);
+        p_swapchain = std::make_unique<Swapchain>(vulkanData);
     }
-    p_swapchain->init_swapchain();    
+    p_swapchain->initSwapchain();
 }
 
-void UFMOEngine::destroy_swapchain()
+void VulkanRenderer::destroySwapchain()
 {
-    //TODO: delegate destroy to swapchain class
+    ZoneScoped;
+    // TODO: delegate destroy to swapchain class
     vkDestroySwapchainKHR(vulkanData.device, p_swapchain->getDataRef().swapchain, nullptr);
 
     // destroy swapchain resources
@@ -311,8 +339,9 @@ void UFMOEngine::destroy_swapchain()
     p_swapchain.reset(nullptr);
 }
 
-void UFMOEngine::init_commands()
+void VulkanRenderer::initCommands()
 {
+    ZoneScoped;
     spdlog::info("UFMOEngine::init commands");
     // create a command pool for commands submitted to the graphics queue.
     // we also want the pool to allow for resetting of individual command buffers
@@ -339,8 +368,9 @@ void UFMOEngine::init_commands()
     }
 }
 
-void UFMOEngine::init_sync_structures()
+void VulkanRenderer::initSyncStructures()
 {
+    ZoneScoped;
     spdlog::info("UFMOEngine::init sync structures");
     // create syncronization structures
     // one fence to control when the gpu has finished rendering the frame,
@@ -359,30 +389,39 @@ void UFMOEngine::init_sync_structures()
     }
 }
 
-void UFMOEngine::draw()
+void VulkanRenderer::draw()
 {
-    
-    //spdlog::debug("...{}",_frameNumber % FRAME_OVERLAP);
-
+    ZoneScoped;
+    // spdlog::debug("...{}",_frameNumber % FRAME_OVERLAP);
 
     // request image from the swapchain
     uint32_t swapchainImageIndex;
 
     // if ( int i = VK_TIMOUT );
-    VK_CHECK(vkWaitForFences(vulkanData.device, 1, &get_current_frame()._renderFence, true, 1000000000));
-    VK_CHECK(vkResetFences(vulkanData.device, 1, &get_current_frame()._renderFence));
+    {
+        ZoneScopedN("Wait for Fence");
+        VK_CHECK(vkWaitForFences(vulkanData.device, 1, &get_current_frame()._renderFence, true, 1000000000));
 
-    auto result = vkAcquireNextImageKHR(vulkanData.device, p_swapchain->getDataRef().swapchain, 1000000000, get_current_frame()._swapchainSemaphore, VK_NULL_HANDLE, &swapchainImageIndex);
+        get_current_frame()._deletionQueue.flush();
+        VK_CHECK(vkResetFences(vulkanData.device, 1, &get_current_frame()._renderFence));
+    }
 
-        //  wait until the gpu has finished rendering the last frame. Timeout of 1
+    {
+        ZoneScopedN("Aquire Next Image");
+        auto result = vkAcquireNextImageKHR(vulkanData.device, p_swapchain->getDataRef().swapchain, 1000000000, get_current_frame()._swapchainSemaphore, VK_NULL_HANDLE, &swapchainImageIndex);
+    }
+
+    //  wait until the gpu has finished rendering the last frame. Timeout of 1
     //  second
-    
 
     // naming it cmd for shorter writing
 
     auto cmdPool = get_current_frame()._commandPool;
 
-    VK_CHECK(vkResetCommandPool(vulkanData.device, cmdPool, 0));
+    {
+        ZoneScopedN("Reset Command Pool");
+        VK_CHECK(vkResetCommandPool(vulkanData.device, cmdPool, 0));
+    }
     auto cmd = get_current_frame()._mainCommandBuffer;
 
     // now that we are sure that the commands finished executing, we can safely
@@ -392,31 +431,34 @@ void UFMOEngine::draw()
     // begin the command buffer recording. We will use this command buffer exactly once, so we want to let vulkan know that
     VkCommandBufferBeginInfo cmdBeginInfo = vkinit::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
-    // start the command buffer recording
-    VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
+    {
+        ZoneScopedN("Command Buffer");
+        // start the command buffer recording
+        VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
-    // make the swapchain image into writeable mode before rendering
-    vkutil::transition_image(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+        // make the swapchain image into writeable mode before rendering
+        vkutil::transition_image(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
-    // make a clear-color from frame number. This will flash with a 120 frame period.
-    VkClearColorValue clearValue;
-    float flash = abs(sin(_frameNumber / 120.f));
-    flash = 1.0f;
-    // if (_frameNumber % 120 )
+        // make a clear-color from frame number. This will flash with a 120 frame period.
+        VkClearColorValue clearValue;
+        float flash = abs(sin(_frameNumber / 120.f));
+        flash = 1.0f;
+        // if (_frameNumber % 120 )
 
-    clearValue = {{0.0f, 0.0f, flash, 1.0f}};
+        clearValue = {{0.0f, 0.0f, flash, 1.0f}};
 
-    VkImageSubresourceRange clearRange = vkinit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
+        VkImageSubresourceRange clearRange = vkinit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
 
-    // clear image
-    vkCmdClearColorImage(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+        // clear image
+        vkCmdClearColorImage(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
 
-    // make the swapchain image into presentable mode VK_IMAGE_LAYOUT_GENERAL  VK_IMAGE_LAYOUT_UNDEFINED
-    // Write after Write
-    vkutil::transition_image_to_present(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        // make the swapchain image into presentable mode VK_IMAGE_LAYOUT_GENERAL  VK_IMAGE_LAYOUT_UNDEFINED
+        // Write after Write
+        vkutil::transition_image_to_present(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
-    // finalize the command buffer (we can no longer add commands, but it can now be executed)
-    VK_CHECK(vkEndCommandBuffer(cmd));
+        // finalize the command buffer (we can no longer add commands, but it can now be executed)
+        VK_CHECK(vkEndCommandBuffer(cmd));
+    }
 
     // prepare the submission to the queue.
     // we want to wait on the _presentSemaphore, as that semaphore is signaled when the swapchain is ready
@@ -431,7 +473,10 @@ void UFMOEngine::draw()
 
     // submit command buffer to the queue and execute it.
     //  _renderFence will now block until the graphic commands finish execution
-    VK_CHECK(vkQueueSubmit2(_graphicsQueue, 1, &submit, get_current_frame()._renderFence));
+    {
+        ZoneScopedN("Submit");
+        VK_CHECK(vkQueueSubmit2(_graphicsQueue, 1, &submit, get_current_frame()._renderFence));
+    }
 
     // prepare present
     // this will put the image we just rendered to into the visible window.
@@ -448,11 +493,16 @@ void UFMOEngine::draw()
 
     presentInfo.pImageIndices = &swapchainImageIndex;
 
-    //Present after Write
-    VK_CHECK(vkQueuePresentKHR(_graphicsQueue, &presentInfo));
+    // Present after Write
+    {
+        ZoneScopedN("Present");
+        VK_CHECK(vkQueuePresentKHR(_graphicsQueue, &presentInfo));
+    }
 
     // increase the number of frames drawn
     _frameNumber++;
+
+    FrameMark;
 
     // if (result == VK_TIMEOUT)
 

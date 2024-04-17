@@ -3,6 +3,8 @@
 #include "engine/engine.h"
 #include <iostream>
 
+#include <entt/entt.hpp>
+
 void set(std::span<int32_t> data)
 {
     for (int i = 0;auto& e : data)
@@ -15,7 +17,7 @@ void set(std::span<int32_t> data)
 void print(std::span<int32_t> data) {
     for (auto &e : data)
     {
-        std::cout << e << std::endl;
+        std::cout << e << " ";
     };
 }
 
@@ -26,11 +28,11 @@ int main(int, char **)
     // print(data);
     // return 0;
 
-    auto engine = new UFMOEngine();
+    auto engine = new VulkanRenderer();
     engine->init();
     // engine->init_vulkan();
     engine->run();
-    engine->cleanup();
+    engine->tearDown();
     // std::string helloJim = generateHelloString("Jim");
     // std::cout << helloJim << std::endl;
     // std::cout << "Hello, from test222!\n";

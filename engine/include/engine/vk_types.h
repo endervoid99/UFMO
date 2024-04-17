@@ -23,6 +23,18 @@
 #include <vulkan/vk_enum_string_helper.h>
 #include <cpptrace/cpptrace.hpp>
 
+#include <memory>
+#include <tracy/Tracy.hpp>
+
+
+struct AllocatedImage {
+    VkImage image;
+    VkImageView imageView;
+    VmaAllocation allocation;
+    VkExtent3D imageExtent;
+    VkFormat imageFormat;
+};
+
 
 #define VK_CHECK(x)                                                 \
 	do                                                              \

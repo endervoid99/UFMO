@@ -78,6 +78,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(cpptrace)
 
+FetchContent_Declare (
+tracy
+GIT_REPOSITORY https://github.com/wolfpld/tracy.git
+GIT_TAG v0.10 #master
+GIT_SHALLOW TRUE
+GIT_PROGRESS TRUE
+)
+FetchContent_MakeAvailable (tracy)
+
 
 
 
@@ -90,7 +99,10 @@ find_package(Vulkan REQUIRED )
 add_library(engine "")
 include(sourcelist.cmake)
 
+option(TRACY_ENABLE ON)
+target_link_libraries(${PROJECT_NAME} TracyClient)
 target_link_libraries(${PROJECT_NAME} Vulkan::Vulkan VulkanMemoryAllocator Eigen3::Eigen spdlog::spdlog_header_only  SDL2main SDL2-static EnTT::EnTT cpptrace::cpptrace)
+
 
 target_include_directories(${PROJECT_NAME}
     PUBLIC ${PROJECT_SOURCE_DIR}/include)
