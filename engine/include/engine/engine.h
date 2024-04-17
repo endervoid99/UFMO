@@ -56,7 +56,8 @@ struct AllocatorCallback {
     static VkAllocationCallbacks *p_allocatorCallback;
 };
 
-//TODO: rename to VulkanContext?
+//TODO: rename to VulkanContext / Device?
+// Device / Swapchain (with Images) / Surface
 struct BasicVulkanData {
     VkInstance instance;                      // Vulkan library handle
     VkDebugUtilsMessengerEXT debug_messenger; // Vulkan debug output handle
@@ -66,6 +67,10 @@ struct BasicVulkanData {
     struct SDL_Window* window{nullptr};
     VkExtent2D windowExtent{1700, 900};
     VmaAllocator allocator;
+    //draw resources
+	AllocatedImage drawImage;
+	VkExtent2D drawExtent;
+    DeletionQueue mainDeletionQueue;
 };
 
 
@@ -80,16 +85,19 @@ struct SwapchainData{
 class Swapchain
 {
 public:
-    Swapchain(const BasicVulkanData& vulkanData);// : m_vulkanData(vulkanData){ };
+    Swapchain(BasicVulkanData& vulkanData);// : m_vulkanData(vulkanData){ };
     ~Swapchain();
 
     void initSwapchain();    
     void createSwapchain(uint32_t width, uint32_t height);
     SwapchainData& getDataRef() {return m_data;};
+
+    
+	
 private:
     
-
-    const BasicVulkanData& m_vulkanData;
+    //TODO: better modularisationb and naming
+    BasicVulkanData& m_vulkanData;
     SwapchainData m_data;
 
     //VkSwapchainKHR swapchain;
@@ -116,7 +124,7 @@ private:
     // Swapchain
     std::unique_ptr<Swapchain> p_swapchain;
     
-    DeletionQueue _mainDeletionQueue;
+    
 
     FrameData _frames[FRAME_OVERLAP];
 
@@ -138,4 +146,5 @@ public:
 
     void initSyncStructures();
     void draw();
+    void draw_background(VkCommandBuffer cmd);
 };

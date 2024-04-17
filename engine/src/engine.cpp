@@ -21,8 +21,6 @@ constexpr bool bUseValidationLayers = false;
 VulkanRenderer *loadedEngine = nullptr;
 VkAllocationCallbacks *AllocatorCallback::p_allocatorCallback = nullptr;
 
-
-
 VkBool32 vkDebugMessageCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
                                 VkDebugUtilsMessageTypeFlagsEXT messageType,
                                 const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData,
@@ -49,9 +47,9 @@ VkBool32 vkDebugMessageCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSe
     return VK_FALSE;
 }
 
-Swapchain::Swapchain(const BasicVulkanData &vulkanData) : m_vulkanData(vulkanData){
+Swapchain::Swapchain(BasicVulkanData &vulkanData) : m_vulkanData(vulkanData){
 
-                                                          };
+                                                    };
 
 Swapchain::~Swapchain(){
 
@@ -66,6 +64,9 @@ void Swapchain::initSwapchain()
 
 void Swapchain::createSwapchain(uint32_t width, uint32_t height)
 {
+    //--------------------------
+    // Swapchain
+    //.........................
     ZoneScoped;
     spdlog::info("UFMOEngine::create swapchain");
     vkb::SwapchainBuilder swapchainBuilder{m_vulkanData.chosenGPU, m_vulkanData.device, m_vulkanData.surface};
@@ -76,9 +77,9 @@ void Swapchain::createSwapchain(uint32_t width, uint32_t height)
                                       //.use_default_format_selection()
                                       .set_desired_format(VkSurfaceFormatKHR{.format = m_data.swapchainImageFormat, .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
                                       // use vsync present mode
-                                      .set_desired_present_mode(VK_PRESENT_MODE_MAILBOX_KHR) //VK_PRESENT_MODE_FIFO_KHR VK_PRESENT_MODE_IMMEDIATE_KHR VK_PRESENT_MODE_MAILBOX_KHR
-                                      ///set_desired_present_mode(VK_PRESENT_MODE_IMMEDIATE_KHR)
-                                      //s.set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
+                                      //.set_desired_present_mode(VK_PRESENT_MODE_MAILBOX_KHR) //VK_PRESENT_MODE_FIFO_KHR VK_PRESENT_MODE_IMMEDIATE_KHR VK_PRESENT_MODE_MAILBOX_KHR
+                                      /// set_desired_present_mode(VK_PRESENT_MODE_IMMEDIATE_KHR)
+                                      .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
                                       .set_desired_extent(width, height)
                                       .set_allocation_callbacks(AllocatorCallback::p_allocatorCallback)
                                       .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
@@ -94,6 +95,46 @@ void Swapchain::createSwapchain(uint32_t width, uint32_t height)
     m_data.swapchainImages = vkbSwapchain.get_images().value();
     spdlog::debug("UFMOEngine::create swapchain: {} images created", m_data.swapchainImages.size());
     m_data.swapchainImageViews = vkbSwapchain.get_image_views().value();
+
+    //------------------------------
+    // Images
+    //------------------------------
+    // draw image size will match the window
+    VkExtent3D drawImageExtent = {
+        m_vulkanData.windowExtent.width,
+        m_vulkanData.windowExtent.height,
+        1};
+
+    // hardcoding the draw format to 32 bit float
+    m_vulkanData.drawImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+    m_vulkanData.drawImage.imageExtent = drawImageExtent;
+
+    VkImageUsageFlags drawImageUsages{};
+    drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    drawImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
+    drawImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+    VkImageCreateInfo rimg_info = vkinit::image_create_info(m_vulkanData.drawImage.imageFormat, drawImageUsages, drawImageExtent);
+
+    // for the draw image, we want to allocate it from gpu local memory
+    VmaAllocationCreateInfo rimg_allocinfo = {};
+    rimg_allocinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    rimg_allocinfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    // allocate and create the image
+    vmaCreateImage(m_vulkanData.allocator, &rimg_info, &rimg_allocinfo, &m_vulkanData.drawImage.image, &m_vulkanData.drawImage.allocation, nullptr);
+
+    // build a image-view for the draw image to use for rendering
+    VkImageViewCreateInfo rview_info = vkinit::imageview_create_info(m_vulkanData.drawImage.imageFormat, m_vulkanData.drawImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
+
+    VK_CHECK(vkCreateImageView(m_vulkanData.device, &rview_info, nullptr, &m_vulkanData.drawImage.imageView));
+
+    // add to deletion queues
+    m_vulkanData.mainDeletionQueue.push_function([=]()
+                                                 {
+		vkDestroyImageView(m_vulkanData.device, m_vulkanData.drawImage.imageView, nullptr);
+		vmaDestroyImage(m_vulkanData.allocator, m_vulkanData.drawImage.image, m_vulkanData.drawImage.allocation); });
 }
 
 VulkanRenderer &VulkanRenderer::get() { return *loadedEngine; }
@@ -107,8 +148,8 @@ void VulkanRenderer::tearDown()
         for (int i = 0; i < FRAME_OVERLAP; i++)
         {
             vkDeviceWaitIdle(vulkanData.device);
-            _mainDeletionQueue.flush();
-           // VK_CHECK(vkWaitForFences(vulkanData.device, 1, &_frames[i]._renderFence, true, 1000000000));
+            vulkanData.mainDeletionQueue.flush();
+            // VK_CHECK(vkWaitForFences(vulkanData.device, 1, &_frames[i]._renderFence, true, 1000000000));
             // already written from before
             vkDestroyCommandPool(vulkanData.device, _frames[i]._commandPool, nullptr);
 
@@ -214,7 +255,7 @@ uint8_t VulkanRenderer::initVulkan()
     _graphicsQueue = vkbDevice.get_queue(vkb::QueueType::graphics).value();
     _graphicsQueueFamily = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
 
-     // initialize the memory allocator
+    // initialize the memory allocator
     VmaAllocatorCreateInfo allocatorInfo = {};
     allocatorInfo.physicalDevice = vulkanData.chosenGPU;
     allocatorInfo.device = vulkanData.device;
@@ -222,9 +263,8 @@ uint8_t VulkanRenderer::initVulkan()
     allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
     vmaCreateAllocator(&allocatorInfo, &vulkanData.allocator);
 
-    _mainDeletionQueue.push_function([&]() {
-        vmaDestroyAllocator(vulkanData.allocator);
-    });
+    vulkanData.mainDeletionQueue.push_function([&]()
+                                               { vmaDestroyAllocator(vulkanData.allocator); });
 
     return 0;
 
@@ -389,6 +429,20 @@ void VulkanRenderer::initSyncStructures()
     }
 }
 
+void VulkanRenderer::draw_background(VkCommandBuffer cmd)
+{
+    // make a clear-color from frame number. This will flash with a 120 frame period.
+    VkClearColorValue clearValue;
+    float flash = abs(sin(_frameNumber / 120.f));
+    flash = 1.0;
+    clearValue = {{0.0f, 0.0f, flash, 1.0f}};
+
+    VkImageSubresourceRange clearRange = vkinit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
+
+    // clear image
+    vkCmdClearColorImage(cmd, vulkanData.drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+}
+
 void VulkanRenderer::draw()
 {
     ZoneScoped;
@@ -433,31 +487,60 @@ void VulkanRenderer::draw()
 
     {
         ZoneScopedN("Command Buffer");
-        // start the command buffer recording
+        vulkanData.drawExtent.width = vulkanData.drawImage.imageExtent.width;
+        vulkanData.drawExtent.height = vulkanData.drawImage.imageExtent.height;
+
         VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
-        // make the swapchain image into writeable mode before rendering
-        vkutil::transition_image(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+        // transition our main draw image into general layout so we can write into it
+        // we will overwrite it all so we dont care about what was the older layout
+        vkutil::transition_image(cmd, vulkanData.drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
-        // make a clear-color from frame number. This will flash with a 120 frame period.
-        VkClearColorValue clearValue;
-        float flash = abs(sin(_frameNumber / 120.f));
-        flash = 1.0f;
-        // if (_frameNumber % 120 )
+        draw_background(cmd);
 
-        clearValue = {{0.0f, 0.0f, flash, 1.0f}};
+        // transition the draw image and the swapchain image into their correct transfer layouts
+        vkutil::transition_image(cmd, vulkanData.drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        vkutil::transition_image(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-        VkImageSubresourceRange clearRange = vkinit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
+        // execute a copy from the draw image into the swapchain (blit)
+        // VK_ACCESS_2_TRANSFER_READ_BIT specifies read access to an image or buffer in a copy operation. 
+        // Such access occurs in the VK_PIPELINE_STAGE_2_COPY_BIT, VK_PIPELINE_STAGE_2_BLIT_BIT, or VK_PIPELINE_STAGE_2_RESOLVE_BIT pipeline stages.
+        vkutil::copy_image_to_image(cmd, vulkanData.drawImage.image, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex],
+                                    vulkanData.drawExtent, p_swapchain->getDataRef().swapchainExtent);
 
-        // clear image
-        vkCmdClearColorImage(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
-
-        // make the swapchain image into presentable mode VK_IMAGE_LAYOUT_GENERAL  VK_IMAGE_LAYOUT_UNDEFINED
-        // Write after Write
-        vkutil::transition_image_to_present(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        // set swapchain image layout to Present so we can show it on the screen
+         //vkutil::transition_image(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        vkutil::transition_image_to_present(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
         // finalize the command buffer (we can no longer add commands, but it can now be executed)
         VK_CHECK(vkEndCommandBuffer(cmd));
+
+        /*         ZoneScopedN("Command Buffer");
+                // start the command buffer recording
+                VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
+
+                // make the swapchain image into writeable mode before rendering
+                vkutil::transition_image(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+                // make a clear-color from frame number. This will flash with a 120 frame period.
+                VkClearColorValue clearValue;
+                float flash = abs(sin(_frameNumber / 120.f));
+                flash = 1.0f;
+                // if (_frameNumber % 120 )
+
+                clearValue = {{0.0f, 0.0f, flash, 1.0f}};
+
+                VkImageSubresourceRange clearRange = vkinit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
+
+                // clear image
+                vkCmdClearColorImage(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+
+                // make the swapchain image into presentable mode VK_IMAGE_LAYOUT_GENERAL  VK_IMAGE_LAYOUT_UNDEFINED
+                // Write after Write
+                vkutil::transition_image_to_present(cmd, p_swapchain->getDataRef().swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+                // finalize the command buffer (we can no longer add commands, but it can now be executed)
+                VK_CHECK(vkEndCommandBuffer(cmd)); */
     }
 
     // prepare the submission to the queue.
