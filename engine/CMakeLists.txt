@@ -87,10 +87,40 @@ GIT_PROGRESS TRUE
 )
 FetchContent_MakeAvailable (tracy)
 
+#FetchContent_Declare (
+#ImGui
+#GIT_REPOSITORY https://github.com/ocornut/imgui
+#GIT_TAG v1.90.5 #master
+#GIT_SHALLOW TRUE
+#GIT_PROGRESS TRUE
+#)
+#FetchContent_MakeAvailable (ImGui)
 
+find_package(Vulkan REQUIRED )
 
+FetchContent_Declare(
+        imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG v1.90.5
+)
+FetchContent_GetProperties(imgui)
+#if (NOT imgui_POPULATED)
+    FetchContent_Populate(imgui)
+    set(IMGUI_INCLUDE_DIR ${imgui_SOURCE_DIR}/)
+    file(GLOB IMGUI_SOURCES ${imgui_SOURCE_DIR}/*.cpp)
+    file(GLOB IMGUI_HEADERS ${imgui_SOURCE_DIR}/*.h)
+    add_library(imgui ${IMGUI_SOURCES} ${IMGUI_SOURCES} ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp )
+    target_include_directories(imgui PUBLIC ${IMGUI_INCLUDE_DIR})
+    target_link_libraries(imgui SDL2main SDL2-static Vulkan::Vulkan)
+    message(STATUS "----------------------------------------")
+    message(STATUS "----------------------------------------")
+    message(STATUS ${IMGUI_SOURCES})
+    message(STATUS "----------------------------------------")
+    message(STATUS "----------------------------------------")
+     #add_definitions(-DIMGUI_IMPL_OPENGL_LOADER_GLAD)
 
-find_package(Vulkan REQUIRED ) 
+    #find_package(imgui CONFIG REQUIRED)
+ 
 #find_package(VMA CONFIG REQUIRED)
 #find_package(Eigen3 REQUIRED ) 
 
@@ -101,11 +131,11 @@ include(sourcelist.cmake)
 
 option(TRACY_ENABLE ON)
 target_link_libraries(${PROJECT_NAME} TracyClient)
-target_link_libraries(${PROJECT_NAME} Vulkan::Vulkan VulkanMemoryAllocator Eigen3::Eigen spdlog::spdlog_header_only  SDL2main SDL2-static EnTT::EnTT cpptrace::cpptrace)
+target_link_libraries(${PROJECT_NAME} Vulkan::Vulkan VulkanMemoryAllocator Eigen3::Eigen spdlog::spdlog_header_only  SDL2main SDL2-static EnTT::EnTT cpptrace::cpptrace imgui)
 
 
-target_include_directories(${PROJECT_NAME}
-    PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(${PROJECT_NAME} 
+    PUBLIC ${PROJECT_SOURCE_DIR}/include ${IMGUI_INCLUDE_DIR})
 
 # On windows copy cpptrace.dll to the same directory as the executable for your_target
 if(WIN32)

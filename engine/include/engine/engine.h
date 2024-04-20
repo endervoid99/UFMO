@@ -115,7 +115,7 @@ class VulkanRenderer
 {
 private:
     
-
+    //VmaAllocator _allocator;
     bool _isInitialized{false};
     int _frameNumber{0};
     bool stop_rendering{false};    
@@ -137,6 +137,16 @@ private:
     void init_descriptors();
 
 public:
+    //immidiate
+    // immediate submit structures
+    VkFence _immFence;
+    VkCommandBuffer _immCommandBuffer;
+    VkCommandPool _immCommandPool;
+
+	
+	void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function);
+    void init_imgui();
+
     DescriptorAllocator globalDescriptorAllocator;
 
 	VkDescriptorSet _drawImageDescriptors;
@@ -157,6 +167,7 @@ public:
     void initSyncStructures();
     void draw();
     void draw_background(VkCommandBuffer cmd);
+    void draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView);
     void init_pipelines();
 	void init_background_pipelines();
 };
